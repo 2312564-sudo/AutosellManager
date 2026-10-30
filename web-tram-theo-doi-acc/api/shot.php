@@ -21,17 +21,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_QQ_KEY'])) {
     if (!$accId) {
         qq_fail(404, 'Không thấy acc');
     }
-    qq_data_dir();
     $old = $pdo->prepare('SELECT file FROM shots WHERE acc_id = ?');
     $old->execute([$accId]);
-    if ($f = $old->fetchColumn()) {
-        @unlink(QQ_DATA . '/shots/' . basename((string)$f));
+    $oldFile = $old->fetchColumn();
+    $file = qq_blob_upload('shots/' . $accId . '_' . bin2hex(random_bytes(8)) . '.jpg', $raw, 'image/jpeg');
+    $sql = qq_uses_postgres()
+        ? 'INSERT INTO shots (acc_id, cmd_id, file, t) VALUES (?, ?, ?, ?) ON CONFLICT (acc_id) DO UPDATE SET cmd_id = EXCLUDED.cmd_id, file = EXCLUDED.file, t = EXCLUDED.t'
+        : 'INSERT OR REPLACE INTO shots (acc_id, cmd_id, file, t) VALUES (?, ?, ?, ?)';
+    $pdo->prepare($sql)->execute([$accId, (int)($_GET['cmd'] ?? 0), $file, time()]);
+    if ($oldFile) {
+        qq_blob_delete((string)$oldFile);
     }
-    $file = $accId . '_' . bin2hex(random_bytes(8)) . '.jpg';
-    if (@file_put_contents(QQ_DATA . '/shots/' . $file, $raw) === false) {
-        qq_fail(500, 'Không ghi được ảnh (thư mục data/shots chưa cho ghi)');
-    }
-    $pdo->prepare('INSERT OR REPLACE INTO shots (acc_id, cmd_id, file, t) VALUES (?, ?, ?, ?)')->execute([$accId, (int)($_GET['cmd'] ?? 0), $file, time()]);
     qq_json(['ok' => 1]);
     exit;
 }
@@ -52,7 +52,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $b = qq_body();
     if (!empty($b['del'])) {
         if ($shot) {
-            @unlink(QQ_DATA . '/shots/' . basename($shot['file']));
+            qq_blob_delete((string)$shot['file']);
             $pdo->prepare('DELETE FROM shots WHERE acc_id = ?')->execute([$accId]);
         }
         qq_json(['ok' => 1]);
@@ -66,15 +66,15 @@ if (!empty($_GET['info'])) {
     $c = $pdo->prepare('SELECT status, result FROM cmds WHERE id = ? AND acc_id = ?');
     $c->execute([$cmdId, $accId]);
     $cmd = $c->fetch() ?: ['status' => '', 'result' => ''];
-    $ready = $shot && (int)$shot['cmd_id'] === $cmdId && is_file(QQ_DATA . '/shots/' . basename($shot['file']));
+    $ready = $shot && (int)$shot['cmd_id'] === $cmdId;
     qq_json(['ok' => 1, 'ready' => $ready, 'cmdStatus' => $cmd['status'], 'result' => $cmd['result'], 't' => $shot ? (int)$shot['t'] : 0]);
     exit;
 }
 
-if (!$shot || !is_file(QQ_DATA . '/shots/' . basename($shot['file']))) {
+if (!$shot) {
     http_response_code(404);
     exit;
 }
 header('Content-Type: image/jpeg');
 header('Cache-Control: no-store');
-readfile(QQ_DATA . '/shots/' . basename($shot['file']));
+echo qq_blob_read((string)$shot['file']);

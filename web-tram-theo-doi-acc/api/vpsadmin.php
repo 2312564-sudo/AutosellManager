@@ -12,7 +12,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         db()->prepare('DELETE FROM vps WHERE name = ?')->execute([$name]);
     } else {
         $s = (array)($b['set'] ?? []);
-        db()->prepare('INSERT OR IGNORE INTO vps (name) VALUES (?)')->execute([$name]);
+        $insertVps = qq_uses_postgres()
+            ? 'INSERT INTO vps (name) VALUES (?) ON CONFLICT (name) DO NOTHING'
+            : 'INSERT OR IGNORE INTO vps (name) VALUES (?)';
+        db()->prepare($insertVps)->execute([$name]);
         if (isset($s['cost'])) {
             db()->prepare('UPDATE vps SET cost = ? WHERE name = ?')->execute([max(0, (float)$s['cost']), $name]);
         }

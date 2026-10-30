@@ -41,11 +41,12 @@ function qq_demo_create(): void
         }
         $lastSeen = $st === 'crash' ? $now - 300 : $now - mt_rand(2, 25);
         $gain = $st === 'idle' ? $now - 41 * 60 : $now - mt_rand(10, 200);
-        $pdo->prepare('INSERT INTO accounts (uuid, name, inst, vps, host, ip, sort, grp, created, last_seen, state, bal, bal_at, sid, cstart, last_gain_at, status, status_since, demo, cost, auto_restart)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 1)')
-            ->execute(['demo-' . $name, $name, $inst, $vps, 'WIN-' . strtoupper(substr(md5($vps), 0, 6)), '203.0.113.' . (20 + $i * 7), $i + 1, $i % 2 ? 'asia' : 'east',
-                $now - 40 * 86400, $lastSeen, json_encode($state), $final, $now, 'demo', 1, $gain, $st, $now - mt_rand(60, 3000), 80000 + mt_rand(0, 4) * 10000]);
-        $id = (int)$pdo->lastInsertId();
+        $sql = 'INSERT INTO accounts (uuid, name, inst, vps, host, ip, sort, grp, created, last_seen, state, bal, bal_at, sid, cstart, last_gain_at, status, status_since, demo, cost, auto_restart)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 1)';
+        $insertAccount = $pdo->prepare(qq_uses_postgres() ? $sql . ' RETURNING id' : $sql);
+        $insertAccount->execute(['demo-' . $name, $name, $inst, $vps, 'WIN-' . strtoupper(substr(md5($vps), 0, 6)), '203.0.113.' . (20 + $i * 7), $i + 1, $i % 2 ? 'asia' : 'east',
+            $now - 40 * 86400, $lastSeen, json_encode($state), $final, $now, 'demo', 1, $gain, $st, $now - mt_rand(60, 3000), 80000 + mt_rand(0, 4) * 10000]);
+        $id = (int)(qq_uses_postgres() ? $insertAccount->fetchColumn() : $pdo->lastInsertId());
         $vpsInfo[$vps][] = ['name' => $inst, 'running' => $st === 'crash' ? 0 : 1, 'ramMb' => 2100 + mt_rand(0, 400), 'cpu' => 0, 'managed' => 1];
 
         // 30 ngày nến giờ, đi ngược từ số dư cuối
@@ -118,16 +119,23 @@ function qq_demo_create(): void
             qq_event($id, 'status', 'Game crash · Game đã tắt · VPS còn sống', null, $now - 240);
         }
     }
-    $ins = $pdo->prepare('INSERT OR REPLACE INTO h1 (acc_id, t, o, h, l, c, inc, sells) VALUES (0, ?, ?, ?, ?, ?, ?, ?)');
+    $ins = $pdo->prepare(qq_uses_postgres()
+        ? 'INSERT INTO h1 (acc_id, t, o, h, l, c, inc, sells) VALUES (0, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (acc_id, t) DO UPDATE SET o = EXCLUDED.o, h = EXCLUDED.h, l = EXCLUDED.l, c = EXCLUDED.c, inc = EXCLUDED.inc, sells = EXCLUDED.sells'
+        : 'INSERT OR REPLACE INTO h1 (acc_id, t, o, h, l, c, inc, sells) VALUES (0, ?, ?, ?, ?, ?, ?, ?)');
     foreach ($hourTotals as $t => $r) {
         $ins->execute([$t, $r['o'], $r['h'], $r['l'], $r['c'], $r['inc'], $r['s']]);
     }
-    $ins = $pdo->prepare('INSERT OR REPLACE INTO m1 (acc_id, t, o, h, l, c, inc, sells) VALUES (0, ?, ?, ?, ?, ?, ?, ?)');
+    $ins = $pdo->prepare(qq_uses_postgres()
+        ? 'INSERT INTO m1 (acc_id, t, o, h, l, c, inc, sells) VALUES (0, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (acc_id, t) DO UPDATE SET o = EXCLUDED.o, h = EXCLUDED.h, l = EXCLUDED.l, c = EXCLUDED.c, inc = EXCLUDED.inc, sells = EXCLUDED.sells'
+        : 'INSERT OR REPLACE INTO m1 (acc_id, t, o, h, l, c, inc, sells) VALUES (0, ?, ?, ?, ?, ?, ?, ?)');
     foreach ($minTotals as $t => $r) {
         $ins->execute([$t, $r['o'], $r['h'], $r['l'], $r['c'], $r['inc'], $r['s']]);
     }
     foreach ($vpsInfo as $vps => $insts) {
-        $pdo->prepare('INSERT OR REPLACE INTO vps (name, host, ip, last_seen, info, cost, note) VALUES (?, ?, ?, ?, ?, 250000, ?)')
+        $sql = qq_uses_postgres()
+            ? 'INSERT INTO vps (name, host, ip, last_seen, info, cost, note) VALUES (?, ?, ?, ?, ?, 250000, ?) ON CONFLICT (name) DO UPDATE SET host = EXCLUDED.host, ip = EXCLUDED.ip, last_seen = EXCLUDED.last_seen, info = EXCLUDED.info, cost = EXCLUDED.cost, note = EXCLUDED.note'
+            : 'INSERT OR REPLACE INTO vps (name, host, ip, last_seen, info, cost, note) VALUES (?, ?, ?, ?, ?, 250000, ?)';
+        $pdo->prepare($sql)
             ->execute([$vps, 'WIN-' . strtoupper(substr(md5($vps), 0, 6)), '203.0.113.' . (100 + (int)substr($vps, -1)), $now - 20,
                 json_encode(['ver' => '1.0', 'instances' => $insts, 'freeRamMb' => 600, 'totalRamMb' => 4096, 'cpu' => 38, 'uptimeSec' => 86400 * 3, 'prism' => 1]), 'VPS mẫu']);
     }

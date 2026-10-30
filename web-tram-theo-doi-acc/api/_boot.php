@@ -1,7 +1,7 @@
 <?php
 /*
  * Trạm theo dõi acc — lõi dùng chung (cấu hình, database, đăng nhập, tiện ích).
- * Chạy PHP 7.4+ với PDO SQLite (có sẵn trên hầu hết hosting). Không cần tạo database.
+ * Chạy trên PHP 7.4+ với PostgreSQL khi deploy serverless, hoặc SQLite khi chạy local.
  */
 declare(strict_types=1);
 
@@ -9,7 +9,7 @@ error_reporting(E_ALL);
 ini_set('display_errors', '0');
 
 define('QQ_ROOT', dirname(__DIR__));
-define('QQ_DATA', QQ_ROOT . '/data');
+define('QQ_DATA', rtrim((string)(getenv('QQ_DATA_DIR') ?: QQ_ROOT . '/data'), '/\\'));
 define('QQ_VERSION', '1.0');
 
 if (!function_exists('str_contains')) {
@@ -59,24 +59,51 @@ function qq_db_path(): string
 
 /* ───────────────────────── database ───────────────────────── */
 
+function qq_uses_postgres(): bool
+{
+    return (string)getenv('POSTGRES_URL') !== '';
+}
+
 function db(): PDO
 {
     static $pdo = null;
     if ($pdo) {
         return $pdo;
     }
+    if (qq_uses_postgres()) {
+        if (!in_array('pgsql', PDO::getAvailableDrivers(), true)) {
+            qq_fail(500, 'PHP chưa bật PDO PostgreSQL (pdo_pgsql).');
+        }
+        $url = parse_url((string)getenv('POSTGRES_URL'));
+        if (!is_array($url) || empty($url['host']) || empty($url['path'])) {
+            qq_fail(500, 'POSTGRES_URL không hợp lệ.');
+        }
+        $options = [];
+        parse_str((string)($url['query'] ?? ''), $options);
+        $sslmode = (string)($options['sslmode'] ?? 'require');
+        $dsn = 'pgsql:host=' . $url['host']
+            . ';port=' . (int)($url['port'] ?? 5432)
+            . ';dbname=' . rawurldecode(ltrim($url['path'], '/'))
+            . ';sslmode=' . $sslmode;
+        $pdo = new PDO($dsn, rawurldecode((string)($url['user'] ?? '')), rawurldecode((string)($url['pass'] ?? '')), [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        ]);
+        qq_migrate($pdo);
+        $pdo->exec('CREATE TABLE IF NOT EXISTS qq_sessions (id TEXT PRIMARY KEY, data TEXT NOT NULL, expires BIGINT NOT NULL)');
+        return $pdo;
+    }
+    if ((string)getenv('VERCEL') !== '') {
+        qq_fail(500, 'Thiếu POSTGRES_URL. Không thể dùng SQLite cục bộ làm database bền vững trên Vercel.');
+    }
     if (!in_array('sqlite', PDO::getAvailableDrivers(), true)) {
-        qq_fail(500, 'Hosting chưa bật PDO SQLite. Vào cPanel > Select PHP Version > bật pdo_sqlite.');
+        qq_fail(500, 'Cần cấu hình POSTGRES_URL hoặc bật PDO SQLite.');
     }
     $pdo = new PDO('sqlite:' . qq_db_path(), null, null, [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         PDO::ATTR_TIMEOUT => 15,
     ]);
-    $pdo->exec('PRAGMA journal_mode=WAL');
-    $pdo->exec('PRAGMA synchronous=NORMAL');
-    $pdo->exec('PRAGMA busy_timeout=15000');
-    $pdo->exec('PRAGMA foreign_keys=OFF');
     qq_migrate($pdo);
     return $pdo;
 }
@@ -92,11 +119,11 @@ function qq_migrate(PDO $pdo): void
     if ($v >= 1) {
         return;
     }
-    $pdo->exec(<<<SQL
+    $schema = <<<SQL
 CREATE TABLE IF NOT EXISTS settings (k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, pass TEXT NOT NULL,
-  role TEXT NOT NULL DEFAULT 'view', groups TEXT NOT NULL DEFAULT '', created INTEGER NOT NULL, last_login INTEGER
+  role TEXT NOT NULL DEFAULT 'view', "groups" TEXT NOT NULL DEFAULT '', created INTEGER NOT NULL, last_login INTEGER
 );
 CREATE TABLE IF NOT EXISTS accounts (
   id INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT UNIQUE NOT NULL, name TEXT NOT NULL DEFAULT '',
@@ -125,11 +152,19 @@ CREATE TABLE IF NOT EXISTS vps (
   last_seen INTEGER NOT NULL DEFAULT 0, info TEXT NOT NULL DEFAULT '{}', cost REAL NOT NULL DEFAULT 0, expire TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS shots (acc_id INTEGER PRIMARY KEY, cmd_id INTEGER NOT NULL, file TEXT NOT NULL, t INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY AUTOINCREMENT, t INTEGER NOT NULL, user TEXT NOT NULL, action TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY AUTOINCREMENT, t INTEGER NOT NULL, "user" TEXT NOT NULL, action TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS logins (ip TEXT NOT NULL, t INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS restarts (acc_id INTEGER NOT NULL, t INTEGER NOT NULL);
-SQL);
-    $pdo->exec("INSERT OR REPLACE INTO settings (k, v) VALUES ('schema', '1')");
+SQL;
+    if (qq_uses_postgres()) {
+        $schema = preg_replace('/\bINTEGER PRIMARY KEY AUTOINCREMENT\b/', 'BIGSERIAL PRIMARY KEY', $schema);
+        $schema = preg_replace('/\bREAL\b/', 'DOUBLE PRECISION', $schema);
+    }
+    $pdo->exec($schema);
+    $stmt = $pdo->prepare(qq_uses_postgres()
+        ? "INSERT INTO settings (k, v) VALUES ('schema', '1') ON CONFLICT (k) DO UPDATE SET v = EXCLUDED.v"
+        : "INSERT OR REPLACE INTO settings (k, v) VALUES ('schema', '1')");
+    $stmt->execute();
 }
 
 /* ───────────────────────── cài đặt ───────────────────────── */
@@ -179,7 +214,10 @@ function setting(string $k, ?string $def = null): string
 
 function setting_set(string $k, string $v): void
 {
-    db()->prepare('INSERT OR REPLACE INTO settings (k, v) VALUES (?, ?)')->execute([$k, $v]);
+    $sql = qq_uses_postgres()
+        ? 'INSERT INTO settings (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v = EXCLUDED.v'
+        : 'INSERT OR REPLACE INTO settings (k, v) VALUES (?, ?)';
+    db()->prepare($sql)->execute([$k, $v]);
 }
 
 function qq_installed(): bool
@@ -310,14 +348,154 @@ function qq_session(): void
     session_name('qqweb');
     session_set_cookie_params(['lifetime' => 60 * 60 * 24 * 30, 'path' => '/', 'secure' => $secure, 'httponly' => true, 'samesite' => 'Lax']);
     ini_set('session.gc_maxlifetime', (string)(60 * 60 * 24 * 30));
-    $sd = QQ_DATA . '/sessions';
-    if (!is_dir($sd)) {
-        @mkdir($sd, 0755, true);
-    }
-    if (is_dir($sd) && is_writable($sd)) {
-        session_save_path($sd);
+    if (qq_uses_postgres()) {
+        $GLOBALS['qq_pg_session_lock_id'] = '';
+        session_set_save_handler(
+            static function () { return true; },
+            static function () {
+                $id = (string)($GLOBALS['qq_pg_session_lock_id'] ?? '');
+                if ($id !== '') {
+                    $st = db()->prepare('SELECT pg_advisory_unlock(hashtext(?))');
+                    $st->execute([$id]);
+                }
+                return true;
+            },
+            static function ($id) {
+                $GLOBALS['qq_pg_session_lock_id'] = (string)$id;
+                $st = db()->prepare('SELECT pg_advisory_lock(hashtext(?))');
+                $st->execute([(string)$id]);
+                $read = db()->prepare('SELECT data FROM qq_sessions WHERE id = ? AND expires > ?');
+                $read->execute([(string)$id, time()]);
+                $data = $read->fetchColumn();
+                return is_string($data) ? (base64_decode($data, true) ?: '') : '';
+            },
+            static function ($id, $data) {
+                $st = db()->prepare('INSERT INTO qq_sessions (id, data, expires) VALUES (?, ?, ?) ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, expires = EXCLUDED.expires');
+                $st->execute([(string)$id, base64_encode((string)$data), time() + 2592000]);
+                if (random_int(1, 100) === 1) {
+                    db()->prepare('DELETE FROM qq_sessions WHERE expires < ?')->execute([time()]);
+                }
+                return true;
+            },
+            static function ($id) {
+                db()->prepare('DELETE FROM qq_sessions WHERE id = ?')->execute([(string)$id]);
+                return true;
+            },
+            static function ($maxLifetime) {
+                db()->prepare('DELETE FROM qq_sessions WHERE expires < ?')->execute([time()]);
+                return true;
+            }
+        );
+    } else {
+        $sd = QQ_DATA . '/sessions';
+        if (!is_dir($sd)) {
+            @mkdir($sd, 0755, true);
+        }
+        if (is_dir($sd) && is_writable($sd)) {
+            session_save_path($sd);
+        }
     }
     session_start();
+}
+
+function qq_blob_request(string $method, string $url, ?string $body = null, array $headers = []): array
+{
+    $token = (string)getenv('BLOB_READ_WRITE_TOKEN');
+    if ($token === '') {
+        throw new RuntimeException('Thiếu cấu hình BLOB_READ_WRITE_TOKEN.');
+    }
+    if (!function_exists('curl_init')) {
+        throw new RuntimeException('PHP chưa bật cURL để kết nối Vercel Blob.');
+    }
+    $storeId = explode('_', $token)[3] ?? '';
+    $apiRequest = strpos($url, 'https://vercel.com/api/blob') === 0;
+    $requestHeaders = ['Authorization: Bearer ' . $token];
+    if ($apiRequest) {
+        $requestHeaders[] = 'x-api-version: 13';
+        $requestHeaders[] = 'x-vercel-blob-store-id: ' . $storeId;
+        $requestHeaders[] = 'x-api-blob-request-id: ' . $storeId . ':' . (int)(microtime(true) * 1000) . ':' . bin2hex(random_bytes(6));
+        $requestHeaders[] = 'x-api-blob-request-attempt: 0';
+        if ($body !== null) {
+            $requestHeaders[] = 'x-content-length: ' . strlen($body);
+        }
+    }
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_CUSTOMREQUEST => $method,
+        CURLOPT_HTTPHEADER => array_merge($requestHeaders, $headers),
+        CURLOPT_TIMEOUT => 20,
+        CURLOPT_CONNECTTIMEOUT => 5,
+    ]);
+    if ($body !== null) {
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
+    }
+    $result = curl_exec($ch);
+    $status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $error = curl_error($ch);
+    curl_close($ch);
+    if (!is_string($result) || $status < 200 || $status >= 300) {
+        throw new RuntimeException('Vercel Blob request failed (' . $status . '): ' . ($error ?: substr((string)$result, 0, 300)));
+    }
+    return [$status, $result];
+}
+
+function qq_blob_upload(string $name, string $contents, string $contentType): string
+{
+    if ((string)getenv('BLOB_READ_WRITE_TOKEN') === '' && !qq_uses_postgres()) {
+        $dir = qq_data_dir() . '/shots';
+        $file = basename($name);
+        if (@file_put_contents($dir . '/' . $file, $contents) === false) {
+            throw new RuntimeException('Không ghi được ảnh vào data/shots.');
+        }
+        return $file;
+    }
+    $url = 'https://vercel.com/api/blob/?' . http_build_query(['pathname' => ltrim($name, '/')]);
+    [, $response] = qq_blob_request('PUT', $url, $contents, [
+        'x-content-type: ' . $contentType,
+        'x-vercel-blob-access: private',
+        'x-add-random-suffix: 0',
+        'Content-Type: application/octet-stream',
+    ]);
+    $blob = json_decode($response, true);
+    if (!is_array($blob) || empty($blob['url'])) {
+        throw new RuntimeException('Vercel Blob trả về phản hồi không hợp lệ.');
+    }
+    return (string)$blob['url'];
+}
+
+function qq_blob_delete(string $url): void
+{
+    if ((string)getenv('BLOB_READ_WRITE_TOKEN') === '' && !qq_uses_postgres()) {
+        $file = basename($url);
+        if ($file !== '' && $file !== '.' && $file !== '..') {
+            @unlink(qq_data_dir() . '/shots/' . $file);
+        }
+        return;
+    }
+    qq_blob_request('POST', 'https://vercel.com/api/blob/delete', json_encode(['urls' => [$url]]), [
+        'Content-Type: application/json',
+    ]);
+}
+
+function qq_blob_read(string $url): string
+{
+    if ((string)getenv('BLOB_READ_WRITE_TOKEN') === '' && !qq_uses_postgres()) {
+        $file = basename($url);
+        $path = qq_data_dir() . '/shots/' . $file;
+        $contents = @file_get_contents($path);
+        if (!is_string($contents)) {
+            throw new RuntimeException('Không đọc được ảnh trong data/shots.');
+        }
+        return $contents;
+    }
+    $host = parse_url($url, PHP_URL_HOST);
+    $suffix = '.private.blob.vercel-storage.com';
+    if (!is_string($host) || substr($host, -strlen($suffix)) !== $suffix) {
+        throw new RuntimeException('Đường dẫn ảnh trong database không phải private Vercel Blob URL.');
+    }
+    [, $contents] = qq_blob_request('GET', $url);
+    return $contents;
 }
 
 function qq_user(): ?array
@@ -328,7 +506,7 @@ function qq_user(): ?array
     }
     static $u = false;
     if ($u === false) {
-        $st = db()->prepare('SELECT id, username, role, groups FROM users WHERE id = ?');
+        $st = db()->prepare('SELECT id, username, role, "groups" FROM users WHERE id = ?');
         $st->execute([$_SESSION['uid']]);
         $u = $st->fetch() ?: null;
     }
@@ -380,7 +558,7 @@ function qq_can_see(array $u, array $acc): bool
 
 function qq_audit(string $user, string $action, string $detail = ''): void
 {
-    db()->prepare('INSERT INTO audit (t, user, action, detail) VALUES (?, ?, ?, ?)')->execute([time(), $user, $action, mb_substr($detail, 0, 500)]);
+    db()->prepare('INSERT INTO audit (t, "user", action, detail) VALUES (?, ?, ?, ?)')->execute([time(), $user, $action, mb_substr($detail, 0, 500)]);
 }
 
 function qq_event(int $accId, string $kind, string $msg, ?float $val = null, ?int $t = null): void

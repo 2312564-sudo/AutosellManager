@@ -876,8 +876,8 @@
       '<div class="row"><button class="btn pri">Lưu</button></div></form>' +
       '<section class="glass card set-sec"><h2>Dữ liệu mẫu</h2><div class="note">12 acc mẫu với 30 ngày số liệu giả để xem thử giao diện. Acc mẫu không điều khiển được. Xoá đi khi đã nối acc thật.</div>' +
       '<div class="row"><button class="btn" type="button" data-demo="create">Tạo dữ liệu mẫu</button><button class="btn danger" type="button" data-demo="clear">Xoá dữ liệu mẫu</button></div></section>' +
-      '<section class="glass card set-sec"><h2>Hệ thống</h2><div class="kv"><span>Phiên bản</span><span>' + esc(inf.version) + '</span><span>PHP</span><span>' + esc(inf.php) + '</span><span>SQLite</span><span>' + esc(inf.sqlite) + ' · ' + inf.dbMb + ' MB</span>' +
-      '<span>Ghi file</span><span class="' + (inf.writable ? 'good' : 'bad') + '">' + (inf.writable ? 'được' : 'KHÔNG ghi được thư mục data') + '</span><span>cURL</span><span class="' + (inf.curl ? 'good' : 'warn') + '">' + (inf.curl ? 'có' : 'không (vẫn chạy, dùng cách khác)') + '</span>' +
+      '<section class="glass card set-sec"><h2>Hệ thống</h2><div class="kv"><span>Phiên bản</span><span>' + esc(inf.version) + '</span><span>PHP</span><span>' + esc(inf.php) + '</span><span>' + esc(inf.database || 'SQLite') + '</span><span>' + esc(inf.sqlite) + (inf.database === 'PostgreSQL' ? '' : ' · ' + inf.dbMb + ' MB') + '</span>' +
+      '<span>Cache tạm</span><span class="' + (inf.writable ? 'good' : 'bad') + '">' + (inf.writable ? 'được' : 'không ghi được') + '</span><span>cURL</span><span class="' + (inf.curl ? 'good' : 'warn') + '">' + (inf.curl ? 'có' : 'không (vẫn chạy, dùng cách khác)') + '</span>' +
       '<span>Địa chỉ</span><span class="mono" style="overflow-wrap:anywhere">' + esc(j.baseUrl) + '</span></div></section>' +
       passwordCard() + '</div>';
     bindPassword();

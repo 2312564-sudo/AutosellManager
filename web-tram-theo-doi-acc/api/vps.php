@@ -32,7 +32,10 @@ $info = [
     'cpu' => round((float)($p['cpu'] ?? 0), 1), 'uptimeSec' => (int)($p['uptimeSec'] ?? 0), 'prism' => !empty($p['prism']) ? 1 : 0,
 ];
 $pdo = db();
-$pdo->prepare('INSERT OR IGNORE INTO vps (name) VALUES (?)')->execute([$name]);
+$insertVps = qq_uses_postgres()
+    ? 'INSERT INTO vps (name) VALUES (?) ON CONFLICT (name) DO NOTHING'
+    : 'INSERT OR IGNORE INTO vps (name) VALUES (?)';
+$pdo->prepare($insertVps)->execute([$name]);
 $pdo->prepare('UPDATE vps SET host = ?, ip = ?, last_seen = ?, info = ? WHERE name = ?')
     ->execute([mb_substr((string)($p['host'] ?? ''), 0, 40), qq_ip(), $now, json_encode($info, JSON_UNESCAPED_UNICODE), $name]);
 

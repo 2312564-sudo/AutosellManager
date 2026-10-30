@@ -19,7 +19,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $role = in_array($c['role'] ?? '', $roles, true) ? $c['role'] : 'view';
         try {
-            $pdo->prepare('INSERT INTO users (username, pass, role, groups, created) VALUES (?, ?, ?, ?, ?)')
+            $pdo->prepare('INSERT INTO users (username, pass, role, "groups", created) VALUES (?, ?, ?, ?, ?)')
                 ->execute([$name, password_hash((string)$c['password'], PASSWORD_DEFAULT), $role, mb_substr(trim((string)($c['groups'] ?? '')), 0, 300), time()]);
         } catch (Throwable $e) {
             qq_fail(400, 'Tên đăng nhập đã có');
@@ -35,7 +35,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->prepare('UPDATE users SET role = ? WHERE id = ?')->execute([$c['role'], $id]);
         }
         if (isset($c['groups'])) {
-            $pdo->prepare('UPDATE users SET groups = ? WHERE id = ?')->execute([mb_substr(trim((string)$c['groups']), 0, 300), $id]);
+            $pdo->prepare('UPDATE users SET "groups" = ? WHERE id = ?')->execute([mb_substr(trim((string)$c['groups']), 0, 300), $id]);
         }
         if (!empty($c['password'])) {
             if (mb_strlen((string)$c['password']) < 6) {
@@ -55,6 +55,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     qq_json(['ok' => 1]);
     exit;
 }
-$users = $pdo->query('SELECT id, username, role, groups, created, last_login FROM users ORDER BY id')->fetchAll();
-$audit = $pdo->query('SELECT t, user, action, detail FROM audit ORDER BY id DESC LIMIT 80')->fetchAll();
+$users = $pdo->query('SELECT id, username, role, "groups", created, last_login FROM users ORDER BY id')->fetchAll();
+$audit = $pdo->query('SELECT t, "user", action, detail FROM audit ORDER BY id DESC LIMIT 80')->fetchAll();
 qq_json(['ok' => 1, 'users' => $users, 'audit' => $audit, 'me' => (int)$u['id']]);

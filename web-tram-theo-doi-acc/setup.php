@@ -6,7 +6,7 @@ require __DIR__ . '/api/_view.php';
 
 $checks = [
     ['PHP 7.4 trở lên (đang có ' . PHP_VERSION . ')', version_compare(PHP_VERSION, '7.4.0', '>=')],
-    ['PDO SQLite (lưu dữ liệu, không cần tạo database)', class_exists('PDO') && in_array('sqlite', PDO::getAvailableDrivers(), true)],
+    ['PDO SQLite hoặc PostgreSQL (lưu dữ liệu)', class_exists('PDO') && (in_array('sqlite', PDO::getAvailableDrivers(), true) || in_array('pgsql', PDO::getAvailableDrivers(), true))],
     ['Thư mục data/ ghi được', (function () { qq_data_dir(); return is_writable(QQ_DATA); })()],
     ['cURL (gửi Discord, tải skin head)', function_exists('curl_init') || ini_get('allow_url_fopen')],
 ];
@@ -55,7 +55,7 @@ qq_sky();
     <?php endforeach; ?>
   </div>
   <?php if (!$allOk): ?>
-    <div class="err">Hosting còn thiếu mục đánh dấu ✗. Vào bảng điều khiển hosting (cPanel → Select PHP Version) bật pdo_sqlite / curl, hoặc đặt quyền ghi 755 cho thư mục <b>data</b>, rồi tải lại trang.</div>
+    <div class="err">PHP còn thiếu thành phần được đánh dấu ✗. Trên Vercel cần pdo_pgsql; hosting thường cần pdo_sqlite. Bật thêm cURL nếu thiếu và cấp quyền ghi cho thư mục dữ liệu tạm, rồi tải lại trang.</div>
   <?php else: ?>
     <?php if ($err): ?><div class="err"><?= htmlspecialchars($err) ?></div><?php endif; ?>
     <label class="field"><span>Tên web</span><input class="input" name="site" value="<?= htmlspecialchars((string)($_POST['site'] ?? 'Trạm theo dõi acc')) ?>"></label>

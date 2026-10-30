@@ -57,10 +57,13 @@ foreach ($keys as $k) {
     $out[$k] = setting($k);
 }
 $base = qq_base_url();
-$dbSize = @filesize(qq_db_path()) ?: 0;
+$isPostgres = qq_uses_postgres();
+$dbSize = $isPostgres ? 0 : (@filesize(qq_db_path()) ?: 0);
+$database = $isPostgres ? 'PostgreSQL' : 'SQLite';
+$dbVersion = $isPostgres ? $database : (string)db()->query('select sqlite_version()')->fetchColumn();
 qq_json([
     'ok' => 1, 'settings' => $out, 'apiKey' => qq_api_key(), 'baseUrl' => $base,
     'webTxt' => "url=$base\nkey=" . qq_api_key() . "\nvps=\nevery=30",
-    'info' => ['version' => QQ_VERSION, 'php' => PHP_VERSION, 'sqlite' => db()->query('select sqlite_version()')->fetchColumn(), 'dbMb' => round($dbSize / 1048576, 1),
+    'info' => ['version' => QQ_VERSION, 'php' => PHP_VERSION, 'database' => $database, 'sqlite' => $dbVersion, 'dbMb' => round($dbSize / 1048576, 1),
         'fastcgi' => function_exists('fastcgi_finish_request'), 'curl' => function_exists('curl_init'), 'writable' => is_writable(QQ_DATA)],
 ]);

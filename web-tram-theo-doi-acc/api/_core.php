@@ -34,7 +34,8 @@ function qq_candle(int $accId, int $now, ?float $bal, ?float $prevClose, float $
         $row = $st->fetch();
         if ($row) {
             if ($bal !== null) {
-                $pdo->prepare("UPDATE $tbl SET h = MAX(COALESCE(h, ?), ?), l = MIN(COALESCE(l, ?), ?), c = ?, o = COALESCE(o, ?), inc = inc + ?, sells = sells + ? WHERE acc_id = ? AND t = ?")
+                $extrema = qq_uses_postgres() ? ['GREATEST', 'LEAST'] : ['MAX', 'MIN'];
+                $pdo->prepare("UPDATE $tbl SET h = {$extrema[0]}(COALESCE(h, ?), ?), l = {$extrema[1]}(COALESCE(l, ?), ?), c = ?, o = COALESCE(o, ?), inc = inc + ?, sells = sells + ? WHERE acc_id = ? AND t = ?")
                     ->execute([$bal, $bal, $bal, $bal, $bal, $prevClose ?? $bal, $inc, $sells, $accId, $t]);
             } elseif ($inc > 0 || $sells > 0) {
                 $pdo->prepare("UPDATE $tbl SET inc = inc + ?, sells = sells + ? WHERE acc_id = ? AND t = ?")->execute([$inc, $sells, $accId, $t]);
@@ -430,7 +431,11 @@ function qq_maintenance(bool $force = false): void
 {
     $now = time();
     $st = db()->prepare("UPDATE settings SET v = ? WHERE k = 'maint_at' AND CAST(v AS INTEGER) < ?");
-    db()->exec("INSERT OR IGNORE INTO settings (k, v) VALUES ('maint_at', '0')");
+    if (qq_uses_postgres()) {
+        db()->exec("INSERT INTO settings (k, v) VALUES ('maint_at', '0') ON CONFLICT (k) DO NOTHING");
+    } else {
+        db()->exec("INSERT OR IGNORE INTO settings (k, v) VALUES ('maint_at', '0')");
+    }
     $st->execute([(string)$now, $force ? $now + 1 : $now - 20]);
     if ($st->rowCount() !== 1) {
         return;
@@ -528,7 +533,7 @@ function qq_prune(int $now): void
     db()->prepare('DELETE FROM audit WHERE t < ?')->execute([$now - 180 * 86400]);
     foreach (db()->query('SELECT acc_id, file, t FROM shots')->fetchAll() as $s) {
         if ($now - (int)$s['t'] > 900) {
-            @unlink(QQ_DATA . '/shots/' . basename($s['file']));
+            qq_blob_delete((string)$s['file']);
             db()->prepare('DELETE FROM shots WHERE acc_id = ?')->execute([$s['acc_id']]);
         }
     }
@@ -538,7 +543,9 @@ function qq_prune(int $now): void
         }
     }
     try {
-        db()->exec('PRAGMA wal_checkpoint(TRUNCATE)');
+        if (!qq_uses_postgres()) {
+            db()->exec('PRAGMA wal_checkpoint(TRUNCATE)');
+        }
     } catch (Throwable $e) {
     }
 }
