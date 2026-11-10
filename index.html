@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cửa thông minh</title>
+<style>
+:root{--bg:#eef1f0;--card:#fff;--fg:#1c2422;--mu:#5e6b67;--line:#d4dbd8;--ok:#1f7a55;--bad:#a8432d;--ac:#2a5d8f;--warn:#b07d10}
+@media(prefers-color-scheme:dark){:root{--bg:#111716;--card:#1a2220;--fg:#e4ebe8;--mu:#93a29d;--line:#2c3734;--ok:#3fa77a;--bad:#d0664e;--ac:#6fa3d6;--warn:#d9a640}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,sans-serif;font-size:15px}
+main{max-width:480px;margin:0 auto;padding:14px;display:flex;flex-direction:column;gap:12px}
+h1{font-size:22px;margin:4px 0 0}.mu{color:var(--mu);font-size:13px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.lbl{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--mu)}
+.dst{font-size:28px;font-weight:600;text-align:center}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+button{font:inherit;font-size:16px;font-weight:600;border:0;border-radius:12px;padding:14px;color:#fff;background:var(--ac);cursor:pointer}
+button:active{transform:scale(.97)}button:disabled{opacity:.4}
+.o{background:var(--ok)}.c{background:var(--bad)}.g{background:#666}.r{background:var(--bad)}
+.st{display:flex;align-items:center;gap:8px}.dot{width:10px;height:10px;border-radius:50%;background:var(--mu);flex:none}
+.on .dot{background:var(--ok)}.off .dot{background:var(--bad)}.try .dot{background:var(--warn)}
+input{font:inherit;width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--fg)}
+.tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}.tabs button{padding:11px;font-size:14px;background:var(--card);color:var(--fg);border:1px solid var(--line)}
+.tabs button.sel{background:var(--ac);color:#fff;border-color:var(--ac)}
+#wrap{position:relative;background:#000;border-radius:10px;overflow:hidden;aspect-ratio:4/3}#view,#ov{position:absolute;inset:0;width:100%;height:100%}
+#banner{font-size:18px;font-weight:600;text-align:center;padding:11px;border-radius:10px;background:var(--bg)}
+#banner.ok{background:var(--ok);color:#fff}#banner.bad{background:var(--bad);color:#fff}#banner.warn{background:var(--warn);color:#fff}
+.bar{height:10px;border-radius:5px;background:var(--bg);overflow:hidden}.bar i{display:block;height:100%;width:0;background:var(--ok);transition:width .3s}
+.net{display:flex;justify-content:space-between;align-items:center;gap:8px;width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg);font-size:15px;font-weight:500;text-align:left;margin-top:6px}
+.net small{color:var(--mu);font-weight:400;white-space:nowrap}
+li{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}li button{padding:6px 12px;font-size:14px}ul{list-style:none;padding:0;margin:0}
+#modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;z-index:50}
+#mbox{background:var(--card);border-radius:16px;padding:22px;max-width:360px;width:100%;text-align:center}#mbox h2{margin:4px 0 8px;font-size:20px}#mbox p{margin:0 0 16px;line-height:1.5}#mbox button{width:100%}
+#log{font-family:ui-monospace,monospace;font-size:12px;color:var(--mu);white-space:pre-wrap;max-height:110px;overflow:auto;margin:0}
+[hidden]{display:none!important}
+</style></head><body><main>
+<div><h1>Cửa thông minh</h1><div class="mu">Dùng ở bất kỳ đâu có Internet. Không có Internet thì dùng Bluetooth khi đứng gần cửa.</div></div>
+
+<div class="card" id="loginBox"><div class="lbl">Đăng nhập (tài khoản EMQX)</div>
+ <input id="user" placeholder="Tên đăng nhập" autocomplete="username">
+ <input id="pass" type="password" placeholder="Mật khẩu" autocomplete="current-password">
+ <label class="mu"><input type="checkbox" id="remember" style="width:auto"> Nhớ đăng nhập trên máy này</label>
+ <button id="bLogin">Đăng nhập</button><div class="mu" id="loginMsg"></div></div>
+
+<div class="card"><div class="lbl">Kết nối</div>
+ <div class="st" id="sSrv"><span class="dot"></span><span>Internet (EMQX): chưa đăng nhập</span></div>
+ <div class="st" id="sEsp"><span class="dot"></span><span>ESP32: chưa rõ</span></div>
+ <div class="st" id="sBle"><span class="dot"></span><span>Bluetooth: chưa nối</span></div>
+ <button class="g" id="bBle">Kết nối Bluetooth</button>
+ <div class="mu" id="bleNote" hidden>Trình duyệt này không hỗ trợ Bluetooth. Dùng Chrome trên Android hoặc máy tính.</div></div>
+
+<div class="tabs"><button id="tDoor" class="sel">Cửa</button><button id="tFace">Quét mặt</button><button id="tWifi">WiFi</button></div>
+
+<section id="pDoor" class="card"><div class="lbl">Trạng thái cửa</div><div class="dst" id="dst">?</div>
+ <div class="row"><button class="o" id="bo" disabled>Mở cửa</button><button class="c" id="bc" disabled>Đóng cửa</button></div>
+ <div class="mu" id="via"></div></section>
+
+<section id="pFace" class="card" hidden>
+ <div id="wrap"><canvas id="view" width="320" height="240"></canvas><canvas id="ov" width="320" height="240"></canvas></div>
+ <div id="banner">Chưa bắt đầu</div><div class="mu" id="finfo"></div>
+ <div class="row"><button id="bScanFace">Quét để mở</button><button class="g" id="bRegFace">Đăng ký mặt</button></div>
+ <button class="g" id="bFlip">Ảnh bị ngược? Xoay 180 độ</button>
+ <div id="pinBox" hidden><input id="pin" type="password" inputmode="numeric" placeholder="Mã PIN quản trị"><button style="width:100%;margin-top:8px" id="bPin">Xác nhận PIN</button></div>
+ <div id="regBox" hidden><div class="mu" id="regHelp">Nhìn vào camera. Trang tự chụp 5 mẫu, mỗi lần nghiêng đầu nhẹ.</div><div class="bar" style="margin:8px 0"><i id="prog"></i></div>
+  <div id="nameBox" hidden><input id="nm" placeholder="Tên người"><button class="o" style="width:100%;margin-top:8px" id="bSave">Lưu gương mặt</button></div></div>
+ <div class="lbl">Đã đăng ký</div><ul id="list"><li class="mu">Đăng nhập để xem</li></ul>
+ <div class="mu">Quét mặt cần Internet. Ảnh 320x240, 1 ảnh mỗi giây, chỉ gửi khi đang quét.</div></section>
+
+<section id="pWifi" class="card" hidden><div class="lbl">WiFi của ESP32</div><div class="st off" id="wifiNow"><span class="dot"></span><span>Không có kết nối</span></div>
+ <button id="bScanWifi" disabled>Quét WiFi xung quanh ESP32</button><div id="nets" class="mu"></div>
+ <input id="ssid" placeholder="Tên WiFi"><input id="wpass" type="password" placeholder="Mật khẩu WiFi">
+ <button class="o" id="bSendWifi" disabled>Gửi WiFi cho ESP32</button><div class="mu">ESP32 chỉ dùng được WiFi 2.4 GHz.</div></section>
+
+<div class="card"><div class="lbl">Nhật ký</div><pre id="log"></pre></div>
+</main>
+<div id="modal" hidden><div id="mbox"><h2 id="mtitle"></h2><p id="mtext"></p><button id="mclose">Đóng</button></div></div>
+<script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/dist/face-api.js"></script>
+<script>
+// ===================== Cau hinh =====================
+const URL_WS='wss://t98720d7.ala.asia-southeast1.emqxsl.com:8084/mqtt';
+const T={cmd:'cuathongminh/cmd',state:'cuathongminh/state',frame:'cuathongminh/frame',faces:'cuathongminh/faces',scan:'cuathongminh/scan',reply:'cuathongminh/reply'};
+const BLE={svc:'6e400001-b5a3-f393-e0a9-e50e24dcca9e',cmd:'6e400002-b5a3-f393-e0a9-e50e24dcca9e',st:'6e400003-b5a3-f393-e0a9-e50e24dcca9e',scan:'6e400004-b5a3-f393-e0a9-e50e24dcca9e'};
+const MODEL='https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/model';
+const THRESH=0.42,NEED=3,COOLDOWN=8000,SAMPLES=5,MIN_PX=28;
+const names={MO:'Đang mở',DONG:'Đang đóng','DANG MO':'Đang quay mở...','DANG DONG':'Đang quay đóng...'};
+const $=i=>document.getElementById(i);
+const log=m=>{$('log').textContent=new Date().toLocaleTimeString('vi-VN')+'  '+m+'\n'+$('log').textContent};
+function set(id,ok,t){const e=$(id);e.className='st '+(ok?'on':'off');e.lastElementChild.textContent=t}
+function popup(title,text){$('mtitle').textContent=title;$('mtext').textContent=text;$('modal').hidden=false}
+$('mclose').onclick=()=>{$('modal').hidden=true};
+
+// ===================== Ket noi qua Internet (MQTT EMQX) =====================
+let cli=null,espOnline=false;
+function mqttOn(){return !!(cli&&cli.connected&&espOnline)}
+try{const u=localStorage.getItem('mq_user'),p=localStorage.getItem('mq_pass');if(u)$('user').value=u;if(p){$('pass').value=p;$('remember').checked=true}}catch(e){}
+function login(){
+ if(typeof mqtt==='undefined'){$('loginMsg').textContent='Không tải được thư viện. Kiểm tra Internet.';return}
+ const u=$('user').value.trim(),p=$('pass').value;if(!u||!p){$('loginMsg').textContent='Nhập tên đăng nhập và mật khẩu';return}
+ try{if($('remember').checked){localStorage.setItem('mq_user',u);localStorage.setItem('mq_pass',p)}else{localStorage.removeItem('mq_user');localStorage.removeItem('mq_pass')}}catch(e){}
+ if(cli)cli.end(true);set('sSrv',false,'Internet (EMQX): đang đăng nhập...');$('loginMsg').textContent='';
+ cli=mqtt.connect(URL_WS,{username:u,password:p,clientId:'web-'+Math.random().toString(16).slice(2,10),reconnectPeriod:4000,connectTimeout:8000,clean:true});
+ cli.on('connect',()=>{set('sSrv',true,'Internet (EMQX): đã đăng nhập');$('loginBox').hidden=true;log('Đã đăng nhập EMQX');
+  cli.subscribe([T.state,T.frame,T.faces,T.scan,T.reply],{qos:0});send('FACES');refresh()});
+ cli.on('reconnect',()=>set('sSrv',false,'Internet (EMQX): mất kết nối, đang nối lại...'));
+ cli.on('offline',()=>{set('sSrv',false,'Internet (EMQX): mất Internet');refresh()});
+ cli.on('error',e=>{if(/auth|authoriz|bad user|password/i.test(e.message)){$('loginMsg').textContent='Sai tên đăng nhập hoặc mật khẩu';$('loginBox').hidden=false;set('sSrv',false,'Internet (EMQX): sai đăng nhập');cli.end(true)}else log('Lỗi EMQX: '+e.message)});
+ cli.on('message',onMqtt);
+}
+function onMqtt(t,m){
+ if(t===T.frame){onFrame(m);return}
+ const s=m.toString();
+ if(t===T.state){let d;try{d=JSON.parse(s)}catch(e){return}espOnline=!!d.online;showEsp(d.door,d.ssid,d.ip,espOnline);refresh()}
+ else if(t===T.faces){try{setFaces(JSON.parse(s))}catch(e){}}
+ else if(t===T.scan){try{showNets(JSON.parse(s))}catch(e){}}
+ else if(t===T.reply){let r;try{r=JSON.parse(s)}catch(e){r={ok:true,msg:s}}log(r.msg);if(onReply)onReply(r)}
+}
+function showEsp(door,ssid,ip,online){
+ set('sEsp',online,online?('ESP32 online, WiFi "'+ssid+'"'+(ip?' ('+ip+')':'')):'ESP32 offline qua Internet (mất điện hoặc mất mạng)');
+ $('dst').textContent=(online||bleOn())?(names[door]||door||'?'):'Không rõ';
+ wifiStatus(ssid,ip);
+ checkWifi(!!ip,ssid,ip)}
+
+// ===================== Ket noi Bluetooth =====================
+let dev=null,bCmd=null,bSt=null,bScan=null,manual=false,retry=0,bleScanWait=null;
+function bleOn(){return !!(bCmd&&dev&&dev.gatt.connected)}
+async function bleSetup(){const g=await dev.gatt.connect(),svc=await g.getPrimaryService(BLE.svc);
+ bCmd=await svc.getCharacteristic(BLE.cmd);bSt=await svc.getCharacteristic(BLE.st);
+ await bSt.startNotifications();bSt.addEventListener('characteristicvaluechanged',e=>bleState(e.target.value));
+ try{bScan=await svc.getCharacteristic(BLE.scan);await bScan.startNotifications();bScan.addEventListener('characteristicvaluechanged',()=>{if(bleScanWait)bleScanWait()})}catch(e){bScan=null}
+ bleState(await bSt.readValue());retry=0;set('sBle',true,'Bluetooth: đã nối');$('bBle').textContent='Ngắt Bluetooth';log('Đã nối Bluetooth');refresh()}
+function bleState(dv){const p=new TextDecoder().decode(dv).trim().split(';'),get=k=>{const x=p.find(v=>v.startsWith(k+'='));return x?x.slice(k.length+1):''};
+ const w=get('WIFI'),ip=(w&&w!=='NONE'&&w!=='WAIT')?w:'';
+ if(!mqttOn())showEsp(p[0],get('SSID'),ip,false);else $('dst').textContent=names[p[0]]||p[0]}
+async function bleReconnect(){if(manual||!dev)return;set('sBle',false,'Bluetooth: mất kết nối');refresh();
+ if(retry>=5){log('Nối lại Bluetooth 5 lần không được');return}retry++;try{await bleSetup()}catch(e){setTimeout(bleReconnect,2000)}}
+$('bBle').onclick=async()=>{
+ if(bleOn()){manual=true;dev.gatt.disconnect();set('sBle',false,'Bluetooth: đã ngắt');$('bBle').textContent='Kết nối Bluetooth';refresh();return}
+ manual=false;try{dev=await navigator.bluetooth.requestDevice({filters:[{services:[BLE.svc]}]});dev.addEventListener('gattserverdisconnected',bleReconnect);
+  set('sBle',false,'Bluetooth: đang nối...');await bleSetup()}catch(e){set('sBle',false,'Bluetooth: chưa nối');log('Không nối được Bluetooth: '+e.message)}};
+if(!navigator.bluetooth){$('bBle').disabled=true;$('bleNote').hidden=false}
+
+// ===================== Gui lenh: Internet truoc, khong co thi Bluetooth =====================
+async function send(c,bleOk=true){
+ if(cli&&cli.connected){cli.publish(T.cmd,c,{qos:(c==='CAM'||c==='SEEN')?0:1});return 'net'}
+ if(bleOk&&bleOn()){try{await bCmd.writeValue(new TextEncoder().encode(c));return 'ble'}catch(e){log('Gửi Bluetooth lỗi: '+e.message)}}
+ return ''}
+function refresh(){const can=mqttOn()||bleOn();['bo','bc','bScanWifi','bSendWifi'].forEach(i=>$(i).disabled=!can);
+ $('via').textContent=mqttOn()?'Lệnh đi qua Internet (EMQX).':bleOn()?'Lệnh đi qua Bluetooth.':'Chưa có đường nối tới ESP32. Đăng nhập hoặc nối Bluetooth.'}
+async function door(open){const w=await send(open?'OPEN':'CLOSE');log(w?((open?'Mở':'Đóng')+' cửa qua '+(w==='net'?'Internet':'Bluetooth')):'Chưa nối được ESP32')}
+$('bo').onclick=()=>door(true);$('bc').onclick=()=>door(false);
+
+// ===================== WiFi cua ESP32 =====================
+function bars(r){return r>-55?'Sóng mạnh':r>-70?'Sóng khá':'Sóng yếu'}
+function showNets(l){const box=$('nets');box.innerHTML='';$('bScanWifi').disabled=false;
+ if(!l.length){box.textContent='Không thấy WiFi 2.4 GHz nào.';return}box.append('Chọn WiFi:');
+ l.forEach(n=>{const b=document.createElement('button');b.className='net';b.type='button';const a=document.createElement('span');a.textContent=(n.k?'Khóa · ':'Mở · ')+n.s;
+  const c=document.createElement('small');c.textContent=bars(n.r)+' '+n.r+' dBm';b.append(a,c);b.onclick=()=>{$('ssid').value=n.s;$('wpass').value='';$('wpass').focus()};box.appendChild(b)})}
+$('bScanWifi').onclick=async()=>{$('bScanWifi').disabled=true;$('nets').textContent='ESP32 đang quét, khoảng 3-5 giây...';
+ if(cli&&cli.connected){send('SCAN');setTimeout(()=>{$('bScanWifi').disabled=false},10000);return}
+ if(bleOn()&&bScan){await send('SCAN');await new Promise(r=>{bleScanWait=r;setTimeout(r,8000)});bleScanWait=null;
+  const txt=new TextDecoder().decode(await bScan.readValue());showNets(txt.split('\n').filter(x=>x).map(l=>{const[s,r,k]=l.split('\t');return{s,r:+r,k:k==='1'}}))}};
+let wantSsid='',wantUntil=0;
+// Trang thai WiFi cua ESP32: da ket noi / dang thu ket noi / khong co ket noi
+function wifiStatus(ssid,ip){const e=$('wifiNow');
+ if(ip&&ssid&&(!wantSsid||ssid===wantSsid)){e.className='st on';e.lastElementChild.textContent='Đã kết nối "'+ssid+'" (IP '+ip+')'}
+ else if(wantSsid||ssid){e.className='st try';e.lastElementChild.textContent='Đang thử kết nối "'+(wantSsid||ssid)+'"...'}
+ else{e.className='st off';e.lastElementChild.textContent='Không có kết nối'}}
+function checkWifi(sta,ssid,ip){if(!wantSsid)return;if(sta&&ssid===wantSsid){popup('Kết nối thành công','ESP32 đã vào WiFi "'+ssid+'" (IP '+ip+').');wantSsid=''}}
+setInterval(()=>{if(wantSsid&&Date.now()>wantUntil){popup('Chưa kết nối được','ESP32 không vào được WiFi "'+wantSsid+'" sau 40 giây. Kiểm tra mật khẩu, hoặc mạng phải là 2.4 GHz.');wantSsid=''}},2000);
+$('bSendWifi').onclick=async()=>{const s=$('ssid').value.trim();if(!s){log('Chọn hoặc nhập tên WiFi');return}
+ const w=await send('WIFI:'+s+'|'+$('wpass').value);$('wpass').value='';if(w){wantSsid=s;wantUntil=Date.now()+40000;wifiStatus('','');log('Đã gửi WiFi "'+s+'" qua '+(w==='net'?'Internet':'Bluetooth'))}};
+
+// ===================== Quet mat (anh camera qua Internet) =====================
+const view=$('view'),vc=view.getContext('2d',{willReadFrequently:true}),ov=$('ov'),oc=ov.getContext('2d');
+const crop=document.createElement('canvas');crop.width=crop.height=224;const cc=crop.getContext('2d');
+let fmode='',faceReady=false,opt=null,cropOpt=null,matcher=null,hits={},lastUnlock=0,lastSeen=0,pinOk='',samples=[],lastShot=0,busy=false,camTimer=null,onReply=null,lastFrame=0,faceList=[];
+function banner(t,c){$('banner').textContent=t;$('banner').className=c||''}
+async function loadModels(){if(faceReady)return true;if(typeof faceapi==='undefined'){banner('Không tải được thư viện nhận diện','bad');return false}
+ banner('Đang tải mô hình nhận diện (lần đầu khoảng 7 MB)...');
+ try{await faceapi.tf.setBackend('webgl');await faceapi.tf.ready();
+  await Promise.all([faceapi.nets.tinyFaceDetector.loadFromUri(MODEL),faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL),faceapi.nets.faceRecognitionNet.loadFromUri(MODEL)]);
+  opt=new faceapi.TinyFaceDetectorOptions({inputSize:320,scoreThreshold:0.3});cropOpt=new faceapi.TinyFaceDetectorOptions({inputSize:224,scoreThreshold:0.3});
+  faceReady=true;buildMatcher();return true}
+ catch(e){banner('Không tải được mô hình: '+e.message,'bad');return false}}
+function setFaces(f){faceList=f;$('list').innerHTML=f.length?'':'<li class="mu">Chưa có ai</li>';
+ f.forEach(x=>{const li=document.createElement('li'),sp=document.createElement('span');sp.textContent=x.name;const b=document.createElement('button');b.className='r';b.textContent='Xóa';
+  b.onclick=()=>delFace(x.name);li.append(sp,b);$('list').appendChild(li)});buildMatcher()}
+function buildMatcher(){if(typeof faceapi==='undefined')return;
+ const lab=faceList.filter(x=>x.d&&x.d.length>=128&&x.d.length%128==0).map(x=>{const ds=[];for(let i=0;i<x.d.length;i+=128)ds.push(new Float32Array(x.d.slice(i,i+128)));return new faceapi.LabeledFaceDescriptors(x.name,ds)});
+ matcher=lab.length?new faceapi.FaceMatcher(lab,THRESH):null}
+function camOn(){send('CAM',false);clearInterval(camTimer);camTimer=setInterval(()=>{if(!fmode)return;send('CAM',false);if(Date.now()-lastFrame>6000)$('finfo').textContent='Chưa nhận được ảnh. ESP32 có đang online không?'},5000)}
+function camOff(){fmode='';clearInterval(camTimer);camTimer=null}
+async function startScanFace(){if(!(cli&&cli.connected)){banner('Cần đăng nhập Internet để quét mặt','bad');return}if(!await loadModels())return;
+ fmode='scan';$('pinBox').hidden=true;$('regBox').hidden=true;banner('Đang quét... nhìn vào camera');camOn()}
+function startRegFace(){if(!(cli&&cli.connected)){banner('Cần đăng nhập Internet để đăng ký mặt','bad');return}
+ if(!pinOk){camOff();$('pinBox').hidden=false;$('regBox').hidden=true;banner('Nhập mã PIN quản trị','warn');return}beginReg()}
+async function beginReg(){if(!await loadModels())return;fmode='reg';samples=[];$('prog').style.width='0';$('nameBox').hidden=true;$('regBox').hidden=false;$('pinBox').hidden=true;
+ $('regHelp').textContent='Nhìn vào camera. Trang tự chụp 5 mẫu, mỗi lần nghiêng đầu nhẹ.';banner('Nhìn vào camera để đăng ký','warn');camOn()}
+$('bFlip').onclick=()=>{if(!(cli&&cli.connected)){banner('Cần đăng nhập Internet','bad');return}send('FLIP',false);banner('Đã gửi lệnh xoay ảnh')};
+$('bScanFace').onclick=startScanFace;$('bRegFace').onclick=startRegFace;
+$('bPin').onclick=()=>{const p=$('pin').value;if(!p)return;pinOk=p;beginReg()};  // PIN duoc ESP32 kiem tra khi luu
+$('bSave').onclick=()=>{const n=$('nm').value.trim();if(!n){banner('Nhập tên trước khi lưu','bad');return}
+ onReply=r=>{onReply=null;if(r.ok){banner(r.msg+'. Chuyển sang quét thử','ok');$('regBox').hidden=true;setTimeout(startScanFace,1500)}else{banner(r.msg,'bad');if(/PIN/.test(r.msg)){pinOk='';$('pinBox').hidden=false}}};
+ send('FACEADD:'+pinOk+'|'+n+'|'+samples.flat().map(v=>v.toFixed(4)).join(','),false);banner('Đang lưu...')};
+function delFace(n){if(!pinOk){startRegFace();banner('Nhập PIN rồi bấm Xóa lại','warn');return}
+ onReply=r=>{onReply=null;banner(r.msg,r.ok?'':'bad');if(!r.ok&&/PIN/.test(r.msg))pinOk=''};send('FACEDEL:'+pinOk+'|'+n,false)}
+function box(b,label,c){oc.clearRect(0,0,ov.width,ov.height);if(!b)return;oc.strokeStyle=c;oc.lineWidth=3;oc.strokeRect(b.x,b.y,b.width,b.height);
+ if(label){oc.fillStyle=c;oc.font='bold 16px sans-serif';oc.fillText(label,b.x,Math.max(16,b.y-6))}}
+// Cat vung mat, phong to len 224x224 roi moi tinh dac trung (giong trang /face tren ESP32)
+async function describe(b){const m=Math.max(b.width,b.height)*1.6,cx=b.x+b.width/2,cy=b.y+b.height/2;cc.fillStyle='#000';cc.fillRect(0,0,224,224);
+ cc.drawImage(view,cx-m/2,cy-m/2,m,m,0,0,224,224);return await faceapi.detectSingleFace(crop,cropOpt).withFaceLandmarks(true).withFaceDescriptor()}
+function onFrame(buf){if(!fmode)return;lastFrame=Date.now();$('finfo').textContent='Ảnh camera qua Internet, 1 ảnh/giây';
+ const url=URL.createObjectURL(new Blob([buf],{type:'image/jpeg'})),img=new Image();
+ img.onload=async()=>{URL.revokeObjectURL(url);if(view.width!==img.width){view.width=ov.width=img.width;view.height=ov.height=img.height}vc.drawImage(img,0,0);
+  if(!busy&&faceReady&&fmode){busy=true;try{await analyze()}catch(e){$('finfo').textContent='Lỗi: '+e.message}busy=false}};
+ img.onerror=()=>URL.revokeObjectURL(url);img.src=url}
+async function analyze(){const det=await faceapi.detectSingleFace(view,opt);
+ if(!det){hits={};box(null);if(Date.now()-lastUnlock>3000)banner(fmode==='reg'?'Nhìn thẳng vào camera':'Không thấy mặt');return}
+ const b=det.box;if(b.width<MIN_PX){box(b,'Lại gần hơn','#d9a400');banner('Lại gần camera hơn','warn');return}
+ const f=await describe(b);if(!f){box(b,'Nhìn thẳng','#d9a400');return}
+ if(fmode==='reg'){box(b,'Đang chụp','#1f7a55');
+  if(samples.length<SAMPLES&&Date.now()-lastShot>900){samples.push(Array.from(f.descriptor));lastShot=Date.now();$('prog').style.width=(samples.length/SAMPLES*100)+'%';
+   banner('Đã chụp '+samples.length+'/'+SAMPLES+'. Nghiêng đầu nhẹ','warn');
+   if(samples.length==SAMPLES){camOff();$('nameBox').hidden=false;$('regHelp').textContent='Chụp xong. Nhập tên rồi bấm Lưu.';banner('Chụp xong. Nhập tên và bấm Lưu','ok')}}return}
+ if(!matcher){box(b,'','#d9a400');banner('Chưa có gương mặt nào. Bấm Đăng ký mặt','warn');return}
+ const m=matcher.findBestMatch(f.descriptor);
+ if(m.label!=='unknown'){if(Date.now()-lastSeen>1000){lastSeen=Date.now();send('SEEN',false)}
+  for(const k in hits)if(k!==m.label)delete hits[k];hits[m.label]=(hits[m.label]||0)+1;
+  box(b,m.label+' '+Math.round((1-m.distance)*100)+'%','#1f7a55');if(Date.now()-lastUnlock>3000)banner('Nhận ra '+m.label,'ok');
+  if(hits[m.label]>=NEED&&Date.now()-lastUnlock>COOLDOWN){hits={};lastUnlock=Date.now();send('UNLOCK:'+m.label,false);banner('Xin chào '+m.label+'. Đang mở cửa...','ok');log('Mở cửa bằng gương mặt: '+m.label)}}
+ else{hits={};box(b,'Người lạ','#a8432d');banner('Không nhận ra gương mặt này','bad')}}
+
+// ===================== Tab =====================
+function tab(n){['Door','Face','Wifi'].forEach(k=>{$('p'+k).hidden=k!==n;$('t'+k).className=k===n?'sel':''});if(n!=='Face')camOff()}
+$('tDoor').onclick=()=>tab('Door');$('tFace').onclick=()=>tab('Face');$('tWifi').onclick=()=>tab('Wifi');
+$('bLogin').onclick=login;$('pass').addEventListener('keydown',e=>{if(e.key==='Enter')login()});
+document.addEventListener('visibilitychange',()=>{if(document.hidden)camOff()});
+if($('user').value&&$('pass').value)login();
+refresh();
+</script></body></html>
